@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<title>Audio File Upload</title>
+	</head>
+
+	<head>
+		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/css/bootstrap.min.css"
+			integrity="sha384-TX8t27EcRE3e/ihU7zmQxVncDAy5uIKz4rEkgIXeMed4M0jlfIDPvg6uqKI2xXr2" crossorigin="anonymous">
+		<!-- <link rel="stylesheet" type="text/css" href="static/styles.css"> -->
+		<style>
+			body {
+				background-color: #999999;
+				max-height: 800px;
+			}
+
+
+			::-webkit-scrollbar {
+				display: none;
+			}
+
+			.response {
+				height: 500px;
+				overflow-y: scroll;
+				border-radius: 10px;
+				border: 1px solid #ccc;
+				box-shadow: 0px 0px 10px #ccc;
+				scrollbar-width: none;
+				-ms-overflow-style: none;
+				overflow-y: scroll;
+			}
+
+			.response p {
+				margin: 0;
+			}
+
+			.response p:nth-child(2n) {
+				background-color: #e9ecef;
+			}
+
+			.response p:nth-child(2n+1) {
+				background-color: #f8f9fa;
+			}
+
+			.response p:before {
+				content: ">";
+				color: #007bff;
+				margin-right: 10px;
+			}
+
+			.container {
+				max-width: 700px;
+			}
+
+			.my-5 {
+				margin-top: 5rem;
+
+			}
+
+			.text-center {
+				text-align: center;
+			}
+
+			.form-inline {
+				display: flex;
+				flex-flow: row wrap;
+				align-items: center;
+			}
+
+			.form-group {
+				flex: 0 0 100%;
+				max-width: 100%;
+			}
+
+			.form-control-file {
+				display: block;
+				width: 100%;
+			}
+
+			.btn {
+				display: inline-block;
+				font-weight: 400;
+				text-align: center;
+				white-space: nowrap;
+				vertical-align: middle;
+				-webkit-user-select: none;
+				-moz-user-select: none;
+				-ms-user-select: none;
+				user-select: none;
+				border: 1px solid transparent;
+				padding: .375rem .75rem;
+				font-size: 1rem;
+				line-height: 1.5;
+				border-radius: .25rem;
+				transition: color .15s ease-in-out, background-color .15s ease-in-out, border-color .15s ease-in-out,
+					box-shadow .15s ease-in-out;
+			}
+
+			.btn-primary {
+				color: #fff;
+				background-color: #007bff;
+				border-color: #007bff;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div class="container my-5">
+			<h1 class="text-center">Stream Audio Results</h1>
+			<form class="form-inline my-5" id="audio-form" action="/t" method="post" enctype="multipart/form-data">
+				<div class="form-group mx-auto row">
+					<input type="file" class="form-control-file" id="audio-file" accept="audio/*">
+					<button type="submit" class="btn btn-primary">Submit</button>
+				</div>
+			</form>
+			<form class="form-inline my-5" id="url-form" action="/url" method="post" enctype="multipart/form-data">
+				<div class="form-group mx-auto row">
+					<input type="text" class="text-input" id="url-full" style="width: 100%;">
+					<button type="submit" class="btn btn-primary">Submit</button>
+				</div>
+			</form>
+
+			<div id="response" class="response"></div>
+		</div>
+		<script>
+
+			var form = document.getElementById( "audio-form" );
+				var url_form = document.getElementById( "url-form" );
+			var responseDiv = document.getElementById( "response" );
+
+
+				url_form.addEventListener( "submit", function ( event ) {
+
+				event.preventDefault();
+				var url = document.getElementById( "url-full" ).value
+				var formData = new FormData();
+				formData.append( "url", url );
+
+				var request = new XMLHttpRequest();
+				request.open( "POST", "/url", true );
+				request.onprogress = function ( event ) {
+					responseDiv.innerHTML += "<p>" + event.target.response + "</p>";
+					responseDiv.scrollTop = responseDiv.scrollHeight;
+
+				}
+				request.send( formData );
+			} );
+
+			form.addEventListener( "submit", function ( event ) {
+				event.preventDefault();
+				var file = document.getElementById( "audio-file" ).files[ 0 ];
+				var formData = new FormData();
+				formData.append( "file", file );
+
+				var request = new XMLHttpRequest();
+				request.open( "POST", "/t", true );
+				request.responseType = "json";
+				request.onload = function () {
+					if ( request.status === 200 ) {
+						var fileName = request.response;
+						console.log( request.response );
+						responseDiv.innerHTML = "<p>File uploaded: " + fileName.file + "</p>";
+						var requestStream = new XMLHttpRequest();
+						requestStream.open( "GET", "/transcribe?=" + fileName.file );
+						requestStream.onprogress = function ( event ) {
+							responseDiv.innerHTML += "<p>" + event.target.response + "</p>";
+							responseDiv.scrollTop = responseDiv.scrollHeight;
+						}
+						requestStream.send();
+					} else {
+						responseDiv.innerHTML = "Error uploading file";
+					}
+				};
+				request.send( formData );
+			} );
+		</script>
+	</body>
+
+</html>
+
+<!-- File: styles.css
+body {
+
+	<body>
+		<div class="container my-5">
+			<h1 class="text-center">Stream Audio Results</h1>
+			<form class="form-inline my-5" id="audio-form" action="/t" method="post" enctype="multipart/form-data">
+				<div class="form-group mx-auto row">
+					<input type="file" class="form-control-file" id="audio-file" accept="audio/*">
+					<button type="submit" class="btn btn-primary">Submit</button>
+				</div>
+			</form>
+			<div id="response" class="response"></div>
+		</div>
+		<script>
+
+			var form = document.getElementById( "audio-form" );
+			var responseDiv = document.getElementById( "response" );
+
+			form.addEventListener( "submit", function ( event ) {
+				event.preventDefault();
+				var file = document.getElementById( "audio-file" ).files[ 0 ];
+				var formData = new FormData();
+				formData.append( "file", file );
+
+				var request = new XMLHttpRequest();
+				request.open( "POST", "/t", true );
+				request.responseType = "json";
+				request.onload = function () {
+					if ( request.status === 200 ) {
+						var fileName = request.response;
+						console.log( request.response );
+						responseDiv.innerHTML = "<p>File uploaded: " + fileName.file + "</p>";
+						var requestStream = new XMLHttpRequest();
+						requestStream.open( "GET", "/transcribe?=" + fileName.file );
+						requestStream.onprogress = function ( event ) {
+							responseDiv.innerHTML += "<p>" + event.target.response + "</p>";
+							responseDiv.scrollTop = responseDiv.scrollHeight;
+						}
+						requestStream.send();
+					} else {
+						responseDiv.innerHTML = "Error uploading file";
+					}
+				};
+				request.send( formData );
+			} );
+		</script>
+	</body>
+
+
+</html>
+
+background-color: #1d87367f;
+} -->
