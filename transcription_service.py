@@ -1,7 +1,6 @@
-import os
-import uuid
-from config import MEDIA_PATH, WHISPER_BINARY, MODEL_PATH
+from config import MODEL_PATH, WHISPER_BINARY
 from utils import run_subprocess
+
 
 class TranscriptionService:
     def __init__(self, wav_file, csv_file):

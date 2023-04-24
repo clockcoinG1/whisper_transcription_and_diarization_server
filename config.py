@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 
 SESSION_TYPE = 'filesystem'

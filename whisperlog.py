@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 
 # Terminal escape sequences for colored output

@@ -1,23 +1,28 @@
 import asyncio
 import os
 import re
+import subprocess
+import uuid
+
 from flask import Flask, Response, redirect, render_template, request, send_file, stream_with_context
 from flask_cors import CORS
+
+from config import PERMANENT_SESSION_LIFETIME, SESSION_TYPE, MEDIA_PATH, MODEL_PATH, WHISPER_BINARY
 from speaker_diff import StandardizeOutput
-from config import SESSION_TYPE, PERMANENT_SESSION_LIFETIME
-from utils import logger
 from transcription_service import TranscriptionService
+from utils import logger
 
 app = Flask("PODV2T")
 app.config['SESSION_TYPE'] = SESSION_TYPE
 app.config['PERMANENT_SESSION_LIFETIME'] = PERMANENT_SESSION_LIFETIME
 CORS(app, send_wildcard=True, resources={r"/": {"origins": ""}})
 
+
 def transcript_generator(uuid_str):
     temp_dir = "media"
     base_file_name = f"{temp_dir}/{uuid_str}"
     wav_file_path = f"{base_file_name}.wav"
-    csv_file_path = f"{MEDIA_PATH}/{uuid_str}.csv"
+    csv_file_path = f"{base_file_name}.csv"
 
     try:
         yield "Transcribing audio...\n"
@@ -37,35 +42,77 @@ def transcript_generator(uuid_str):
         if os.path.exists(csv_file_path):
             os.remove(csv_file_path)
 
+
 @app.route('/transcribe', methods=["GET", "POST"])
 def transcription():
-    if request.method == 'GET':
-        return render_template('index.html')
-    else:
-        gen_uuid_str = request.query_string.split(b'=')[1].decode('utf-8')
+    try:
+        gen_uuid_str = request.query_string.split(b'=')[1].decode('utf-8').split('.')[0]
         return Response(stream_with_context(transcript_generator(gen_uuid_str)))
+    except Exception as e:
+        logger.error("An error occurred while transcribing audio: %s", e)
+        raise
+
 
 @app.route('/', methods=["GET", "POST"])
 def index():
     if request.method == 'GET':
         return render_template('index.html')
 
+
 @app.route('/t', methods=['GET', 'POST'])
 async def upload_file():
-    if request.method == 'POST':
-        try:
-            file = request.files['file']
-            file_name = file.filename
-            ext = re.search(r'\.([a-zA-Z0-9]+)$', file_name).group(1)
-            uuid_str = str(uuid.uuid4())
-            file_new = f"{uuid_str}.{ext}"
-            file_converted = f"{uuid_str}.wav"
-            file.save(os.path.join('media', file_new))
-            logger.info("\033[43mSAVED %s to %s!\033[0m", file_name, file_new)
-        except Exception as e:
-            logger.error("file not found ... %s", e)
+    try:
+        file = request.files['file']
+        file_name = file.filename
+        ext = re.search(r'\.([a-zA-Z0-9]+)$', file_name).group(1)
+        uuid_str = str(uuid.uuid4())
+        file_new = f"{uuid_str}"
+        file.save(os.path.join('media', file_new))
+        logger.info("\033[43mSAVED %s to %s!\033[0m", file_name, file_new)
 
-        # Rest of the code remains the same
+        p1 = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name:stream_tags=language",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            f'media/{file_new}',
+            stdout=subprocess.PIPE,
+        )
+        codec = await p1.stdout.read()
+        codec = codec.decode("utf8").strip()
+        logger.info("codec is %s", codec)
+        if codec != 'pcm_mulaw':
+            logger.info('CONVERTING FILE TO WAV....')
+            process_convert = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-loglevel",
+                "panic",
+                "-i",
+                f"media/{file_new}",
+                "-y",
+                "-probesize",
+                "32",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-acodec",
+                "pcm_s16le",
+                f"media/{file_new}.wav",
+            )
+            await process_convert.communicate()
+            logger.info('CONVERTED FILE TO WAV!')
+            os.remove(f"media/{file_new}")
+
+            return redirect(f"/transcribe?file={file_new}")
+    except Exception as e:
+        logger.error("file not found ... %s", e)
+        return redirect('/', code=400)
 
 
 @app.route('/url', methods=["GET", "POST"])

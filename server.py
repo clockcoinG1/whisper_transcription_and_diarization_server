@@ -6,7 +6,8 @@ import uuid
 from asyncio.subprocess import PIPE
 from datetime import timedelta
 
-from flask import Flask, Response, redirect, render_template, request, send_file, stream_with_context
+from flask import (Flask, Response, redirect, render_template, request,
+                   send_file, stream_with_context)
 from flask_cors import CORS
 
 from speaker_diff import StandardizeOutput
@@ -59,7 +60,7 @@ def transcribe_audio(wav_file, csv_file):
         with open(os.path.join(MEDIA_PATH, f'transcript_{uuid.uuid4()}.txt'), "a", encoding="utf-8") as tmp_file:
             logger.info(f"Transcribing {wav_file} to {csv_file}")
             logger.debug(f"Running command: {' '.join(args)}")
-            logger.debug(f"Command output:")
+            logger.debug("Command output:")
             yield from run_subprocess(args, tmp_file)
     except Exception as e:
         logger.error("An error occurred while transcribing audio for file %s: %s", wav_file, e)

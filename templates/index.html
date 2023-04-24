@@ -157,12 +157,12 @@
 				request.open( "POST", "/t", true );
 				request.responseType = "json";
 				request.onload = function () {
-					if ( request.status === 200 ) {
+					if (request.status !== 400) {
 						var fileName = request.response;
 						console.log( request.response );
 						responseDiv.innerHTML = "<p>File uploaded: " + fileName.file + "</p>";
 						var requestStream = new XMLHttpRequest();
-						requestStream.open( "GET", "/transcribe?=" + fileName.file );
+						requestStream.open("POST", "/transcribe?=" + fileName.file);
 						requestStream.onprogress = function ( event ) {
 							responseDiv.innerHTML += "<p>" + event.target.response + "</p>";
 							responseDiv.scrollTop = responseDiv.scrollHeight;

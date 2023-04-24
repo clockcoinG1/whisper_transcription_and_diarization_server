@@ -1,0 +1,10 @@
+app.log
+media/*
+models/*
+bin/*
+__pycache__/*
+.benchmarks/*
+.mypy_cache/*
+.pytest_cache/*
+.ruff_cache/*
+.env
