@@ -1,13 +1,12 @@
-import asyncio
 import os
 import re
-import subprocess
 import uuid
 
-from flask import Flask, Response, redirect, render_template, request, send_file, stream_with_context
+from flask import Flask, Response, render_template, request, send_file, stream_with_context
 from flask_cors import CORS
 
-from config import PERMANENT_SESSION_LIFETIME, SESSION_TYPE, MEDIA_PATH, MODEL_PATH, WHISPER_BINARY
+from config import *
+from media_processor import FileMediaSource, MediaProcessor, URLMediaSource
 from speaker_diff import StandardizeOutput
 from transcription_service import TranscriptionService
 from utils import logger
@@ -43,16 +42,6 @@ def transcript_generator(uuid_str):
             os.remove(csv_file_path)
 
 
-@app.route('/transcribe', methods=["GET", "POST"])
-def transcription():
-    try:
-        gen_uuid_str = request.query_string.split(b'=')[1].decode('utf-8').split('.')[0]
-        return Response(stream_with_context(transcript_generator(gen_uuid_str)))
-    except Exception as e:
-        logger.error("An error occurred while transcribing audio: %s", e)
-        raise
-
-
 @app.route('/', methods=["GET", "POST"])
 def index():
     if request.method == 'GET':
@@ -60,138 +49,41 @@ def index():
 
 
 @app.route('/t', methods=['GET', 'POST'])
-async def upload_file():
-    try:
-        file = request.files['file']
-        file_name = file.filename
-        ext = re.search(r'\.([a-zA-Z0-9]+)$', file_name).group(1)
-        uuid_str = str(uuid.uuid4())
-        file_new = f"{uuid_str}"
-        file.save(os.path.join('media', file_new))
-        logger.info("\033[43mSAVED %s to %s!\033[0m", file_name, file_new)
+def upload_file():
+    file = request.files['file']
+    uuid_str = str(uuid.uuid4())
+    file_new = f"{uuid_str}"
+    file.save(os.path.join('media', file_new))
 
-        p1 = await asyncio.create_subprocess_exec(
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=codec_name:stream_tags=language",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            f'media/{file_new}',
-            stdout=subprocess.PIPE,
-        )
-        codec = await p1.stdout.read()
-        codec = codec.decode("utf8").strip()
-        logger.info("codec is %s", codec)
-        if codec != 'pcm_mulaw':
-            logger.info('CONVERTING FILE TO WAV....')
-            process_convert = await asyncio.create_subprocess_exec(
-                "ffmpeg",
-                "-loglevel",
-                "panic",
-                "-i",
-                f"media/{file_new}",
-                "-y",
-                "-probesize",
-                "32",
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-                "-acodec",
-                "pcm_s16le",
-                f"media/{file_new}.wav",
-            )
-            await process_convert.communicate()
-            logger.info('CONVERTED FILE TO WAV!')
-            os.remove(f"media/{file_new}")
+    def generate(file_new=file_new):
+        file_media_source = FileMediaSource(os.path.join('media', file_new))
+        media_processor = MediaProcessor(file_media_source)
+        yield f"Preparing audio file ..."
+        media_processor.download_media()
+        media_processor.extract_audio_and_resample()
+        for line in media_processor.transcribe_audio():
+            yield line
 
-            return redirect(f"/transcribe?file={file_new}")
-    except Exception as e:
-        logger.error("file not found ... %s", e)
-        return redirect('/', code=400)
+    return Response(stream_with_context(generate(file_new)))
 
 
 @app.route('/url', methods=["GET", "POST"])
 def tr_url():
     def gen():
         source_url = request.form.get('url')
-        temp_dir = os.path.join(os.getcwd(), 'media')
-        if not os.path.exists(temp_dir):
-            os.mkdir(temp_dir)
+        url_media_source = URLMediaSource(source_url)
+        media_processor = MediaProcessor(url_media_source)
 
-        uuid_str = str(uuid.uuid4())
-        base_file_name = f"{temp_dir}/{uuid_str}"
         yield f"Downloading media.... {source_url}"
-        subprocess.run(
-            [
-                "yt-dlp",
-                "-f",
-                "bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--xattrs",
-                f"{source_url}",
-                "-o",
-                f"{base_file_name}.mp4",
-            ]
-        )
-        yield "Extracting Audio and Resampling..."
-        logger.info("Extracting audio and resampling...")
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-i",
-                f"{base_file_name}.mp4",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-                "-c:a",
-                "pcm_s16le",
-                "-y",
-                f"{base_file_name}.wav",
-            ]
-        )
-        logger.info("Transcribing...")
-        yield "Transcribing audio..."
-        proc = subprocess.Popen(
-            [
-                WHISPER_BINARY,
-                "-m",
-                MODEL_PATH,
-                "-ocsv",
-                "-f",
-                f"{base_file_name}.wav",
-                "-t",
-                "8",
-                "-of",
-                f"media/{uuid_str}",
-            ],
-            stdout=subprocess.PIPE,
-        )
-        transcript_file = open(f"{temp_dir}/transcript_{uuid_str}.txt", "a", encoding="utf-8")
+        media_processor.download_media()
 
-        # Generator for the transcript
-        for line in iter(proc.stdout.readline, ''):
-            if not line:
-                yield f"{uuid_str}.csv"
-                break
-            if line.startswith(b"["):
-                line = line.decode("utf8").strip().split("]")[1]
-                transcript_file.write(line)
-                yield f"{line}"
-            else:
-                continue
-        # Run speaker_diff
-        wav_file_path = f"{base_file_name}.wav"
-        csv_file_path = f"{base_file_name}.csv"
-        speaker_diar = StandardizeOutput(wav_file_path=wav_file_path, csv_file_path=csv_file_path)
-        speaker_diar.get_standardized_output()
+        yield "Extracting Audio and Resampling..."
+        media_processor.extract_audio_and_resample()
+
+        for line in media_processor.transcribe_audio():
+            yield line
+
+        # media_processor.run_speaker_diff()
 
     return Response(stream_with_context(gen()))
 
