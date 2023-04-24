@@ -1,14 +1,12 @@
 import os
-import re
 import uuid
 
 from flask import Flask, Response, render_template, request, send_file, stream_with_context
 from flask_cors import CORS
 
 from config import *
-from media_processor import FileMediaSource, MediaProcessor, URLMediaSource
+from media_processor import FileMediaSource, MediaProcessor, URLMediaSource, MediaTranscriptionFacade
 from speaker_diff import StandardizeOutput
-from transcription_service import TranscriptionService
 from utils import logger
 
 app = Flask("PODV2T")
@@ -17,32 +15,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = PERMANENT_SESSION_LIFETIME
 CORS(app, send_wildcard=True, resources={r"/": {"origins": ""}})
 
 
-def transcript_generator(uuid_str):
-    temp_dir = "media"
-    base_file_name = f"{temp_dir}/{uuid_str}"
-    wav_file_path = f"{base_file_name}.wav"
-    csv_file_path = f"{base_file_name}.csv"
-
-    try:
-        yield "Transcribing audio...\n"
-        transcription_service = TranscriptionService(wav_file_path, csv_file_path)
-        yield from transcription_service.transcribe_audio()
-        speaker_diar = StandardizeOutput(wav_file_path=wav_file_path, csv_file_path=csv_file_path)
-        speaker_diar.get_standardized_output()
-        yield f"Speaker diff output:\n{speaker_diar.final_output}\n"
-    except Exception as e:
-        logger.error("An error occurred while transcribing audio for file %s: %s", uuid_str, e)
-        raise
-    else:
-        yield f"\nTranscribed: http://localhost:8833/download/{uuid_str}.csv"
-    finally:
-        if os.path.exists(wav_file_path):
-            os.remove(wav_file_path)
-        if os.path.exists(csv_file_path):
-            os.remove(csv_file_path)
-
-
-@app.route('/', methods=["GET", "POST"])
+@app.route('/', methods=["GET"])
 def index():
     if request.method == 'GET':
         return render_template('index.html')
@@ -57,12 +30,17 @@ def upload_file():
 
     def generate(file_new=file_new):
         file_media_source = FileMediaSource(os.path.join('media', file_new))
-        media_processor = MediaProcessor(file_media_source)
-        yield f"Preparing audio file ..."
-        media_processor.download_media()
-        media_processor.extract_audio_and_resample()
-        for line in media_processor.transcribe_audio():
-            yield line
+        transcription_facade = MediaTranscriptionFacade(file_media_source)
+
+        try:
+            for line in transcription_facade.transcribe_media():
+                yield line
+        except Exception as e:
+            logger.error("An error occurred while extracting audio for file %s: %s", uuid_str, e)
+            yield f"An error occurred while extracting audio for file {uuid_str}: {e}"
+            return
+        finally:
+            yield f"<br> Transcription completed!"
 
     return Response(stream_with_context(generate(file_new)))
 
@@ -72,18 +50,17 @@ def tr_url():
     def gen():
         source_url = request.form.get('url')
         url_media_source = URLMediaSource(source_url)
-        media_processor = MediaProcessor(url_media_source)
+        transcription_facade = MediaTranscriptionFacade(url_media_source)
 
-        yield f"Downloading media.... {source_url}"
-        media_processor.download_media()
-
-        yield "Extracting Audio and Resampling..."
-        media_processor.extract_audio_and_resample()
-
-        for line in media_processor.transcribe_audio():
-            yield line
-
-        # media_processor.run_speaker_diff()
+        try:
+            for line in transcription_facade.transcribe_media():
+                yield line
+        except Exception as e:
+            logger.error("An error occurred while extracting audio for URL %s: %s", source_url, e)
+            yield f"An error occurred while extracting audio for URL {source_url}: {e}"
+            return
+        finally:
+            yield f"<br> Transcription completed!"
 
     return Response(stream_with_context(gen()))
 

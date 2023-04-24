@@ -3,9 +3,11 @@ import shutil
 import subprocess
 import uuid
 from abc import ABC, abstractmethod
-
+from whisperlog import setup_logger
 from config import *
 from speaker_diff import StandardizeOutput
+
+logger = setup_logger("PODV2T", LOG_FILE)
 
 
 class MediaSource(ABC):
@@ -78,6 +80,7 @@ class MediaProcessor:
         )
 
     def transcribe_audio(self):
+        logger.info(f"transcribing audio for {self.uuid_str}")
         proc = subprocess.Popen(
             [
                 WHISPER_BINARY,
@@ -94,16 +97,20 @@ class MediaProcessor:
             stdout=subprocess.PIPE,
         )
         transcript_file = open(f"{self.temp_dir}/transcript_{self.uuid_str}.txt", "a", encoding="utf-8")
-
         for line in iter(proc.stdout.readline, ""):
             if not line:
-                yield f"<a href='http://localhost:8833/{self.uuid_str}.csv' target='_blank'>Download CSV</a>"
+                logger.info("finished processing")
+                yield (
+                    f"\n\n<a class='download_csv_a' href='http://localhost:8833/download/c/{self.uuid_str}.csv'"
+                    " target='_blank'>Download CSV </a>\n\n\n"
+                )
                 break
             if line.startswith(b"["):
-                line = line.decode("utf8").strip().split("]")[1]
+                line = line.decode("utf8").strip()
                 transcript_file.write(line)
-                yield f"{line}"
+                yield f"<br>{line}"
             else:
+                logger.info("Not a line")
                 continue
 
     def run_speaker_diff(self):
@@ -111,3 +118,18 @@ class MediaProcessor:
         csv_file_path = f"{self.base_file_name}.csv"
         speaker_diar = StandardizeOutput(wav_file_path=wav_file_path, csv_file_path=csv_file_path)
         speaker_diar.get_standardized_output()
+
+
+class MediaTranscriptionFacade:
+    def __init__(self, media_source):
+        self.media_processor = MediaProcessor(media_source)
+
+    def transcribe_media(self):
+        try:
+            self.media_processor.download_media()
+            self.media_processor.extract_audio_and_resample()
+            transcription = self.media_processor.transcribe_audio()
+            return transcription
+        except Exception as e:
+            logger.error("An error occurred during media transcription: %s", e)
+            return None
