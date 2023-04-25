@@ -1,18 +1,31 @@
 import os
+import sys
 import uuid
 
 from flask import Flask, Response, render_template, request, send_file, stream_with_context
 from flask_cors import CORS
 
 from config import *
-from media_processor import FileMediaSource, MediaProcessor, URLMediaSource, MediaTranscriptionFacade
-from speaker_diff import StandardizeOutput
+from media_processor import FileMediaSource, MediaSource, MediaTranscriptionFacade, URLMediaSource
 from utils import logger
 
 app = Flask("PODV2T")
 app.config['SESSION_TYPE'] = SESSION_TYPE
 app.config['PERMANENT_SESSION_LIFETIME'] = PERMANENT_SESSION_LIFETIME
 CORS(app, send_wildcard=True, resources={r"/": {"origins": ""}})
+
+
+def gen(url_media_source: MediaSource):
+    transcription_facade = MediaTranscriptionFacade(url_media_source)
+
+    try:
+        for line in transcription_facade.transcribe_media():
+            yield line
+    except Exception as e:
+        logger.error(f"An error occurred while extracting audio {e}")
+        yield f"An error occurred while extracting audio {e}"
+    finally:
+        yield "<br> Transcription completed!"
 
 
 @app.route('/', methods=["GET"])
@@ -24,45 +37,18 @@ def index():
 @app.route('/t', methods=['GET', 'POST'])
 def upload_file():
     file = request.files['file']
-    uuid_str = str(uuid.uuid4())
-    file_new = f"{uuid_str}"
+    file_new = f"{str(uuid.uuid4())}"
     file.save(os.path.join('media', file_new))
 
-    def generate(file_new=file_new):
-        file_media_source = FileMediaSource(os.path.join('media', file_new))
-        transcription_facade = MediaTranscriptionFacade(file_media_source)
-
-        try:
-            for line in transcription_facade.transcribe_media():
-                yield line
-        except Exception as e:
-            logger.error("An error occurred while extracting audio for file %s: %s", uuid_str, e)
-            yield f"An error occurred while extracting audio for file {uuid_str}: {e}"
-            return
-        finally:
-            yield f"<br> Transcription completed!"
-
-    return Response(stream_with_context(generate(file_new)))
+    return Response(stream_with_context(gen(FileMediaSource(os.path.join('media', file_new)))))
 
 
 @app.route('/url', methods=["GET", "POST"])
 def tr_url():
-    def gen():
-        source_url = request.form.get('url')
-        url_media_source = URLMediaSource(source_url)
-        transcription_facade = MediaTranscriptionFacade(url_media_source)
+    source_url = request.form.get('url')
+    url_media_source = URLMediaSource(source_url)
 
-        try:
-            for line in transcription_facade.transcribe_media():
-                yield line
-        except Exception as e:
-            logger.error("An error occurred while extracting audio for URL %s: %s", source_url, e)
-            yield f"An error occurred while extracting audio for URL {source_url}: {e}"
-            return
-        finally:
-            yield f"<br> Transcription completed!"
-
-    return Response(stream_with_context(gen()))
+    return Response(stream_with_context(gen(url_media_source)))
 
 
 @app.route('/download/<transcription_type>/<uuid_str>', methods=["GET"])
@@ -85,7 +71,17 @@ def styles():
     return render_template('styles.css')
 
 
-if __name__ == '__main__':
+def main():
     logger.info('Starting server...')
-    port = int(os.environ.get('PORT') if os.environ.get('PORT') is not None else 8833)
-    app.run(debug=False, port=port)
+    try:
+        port = int(os.environ.get('PORT') if os.environ.get('PORT') is not None else 8833)
+        app.run(debug=False, port=port)
+    except Exception as e:
+        logger.error('Failed to start server: %s', e)
+        sys.exit(1)
+    finally:
+        logger.info('Server has stopped.')
+
+
+if __name__ == "__main__":
+    main()

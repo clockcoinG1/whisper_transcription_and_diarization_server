@@ -3,9 +3,10 @@ import shutil
 import subprocess
 import uuid
 from abc import ABC, abstractmethod
-from whisperlog import setup_logger
+
 from config import *
 from speaker_diff import StandardizeOutput
+from whisperlog import setup_logger
 
 logger = setup_logger("PODV2T", LOG_FILE)
 
@@ -101,8 +102,8 @@ class MediaProcessor:
             if not line:
                 logger.info("finished processing")
                 yield (
-                    f"\n\n<a class='download_csv_a' href='http://localhost:8833/download/c/{self.uuid_str}.csv'"
-                    " target='_blank'>Download CSV </a>\n\n\n"
+                    f"<br/><br/><a class='download_csv_a' href='http://localhost:8833/download/c/{self.uuid_str}.csv'"
+                    " target='_blank'>Download CSV </a><br/><br/>"
                 )
                 break
             if line.startswith(b"["):
